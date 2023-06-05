@@ -10,31 +10,19 @@ struct memb_md_t {
     char *name;             // Nome do arquivo
     size_t off_set;         // off set em relacao ao inicio do archiver
     size_t m_size;          // tamanho do membro
-    struct memb_md_t *prox; // ptr para o proximo
 };
 
-struct metad_t {
-    struct memb_md_t *head;
-    struct memb_md_t *tail;
+struct metad_t{
+    struct memb_md_t **membs;
     size_t memb_sz;
 };
 
+// META
 // inicializa a estrutura de metadados
-int init_meta(struct metad_t *md, size_t memb_sz);
+struct meta_t *init_meta(size_t memb_sz);
 
 // Libera memoria alocada para os metadados
-int destroi_meta(struct metad_t *md);
-
-// aloca memoria para membro no diretorio
-struct memb_md_t *cria_membro();
-
-// libera memoria
-struct memb_md_t *destroi_membro(struct memb_md_t *mmd);
-
-// busca membro pelo nome dele, retorna-o
-// o mmd_ant eh atualizado para o membro anterior ao
-// retornado. Se o mmd achado for a head, mmd_ant vai ser NULL
-struct memb_md_t *busca_membro(char *name, struct memb_md_t **mmd_ant, struct metad_t *md);
+struct meta_t *destroi_meta(struct metad_t *md);
 
 // retorna 0 em caso de erro
 // 1 caso contrario
@@ -45,8 +33,22 @@ int dump_meta(FILE *archive, struct metad_t *md);
 
 // mostra no stdout o conteudo dos metadados
 void print_meta(struct metad_t *md);
+// META
+
+// MEMBRO
+// aloca memoria para membro no diretorio
+struct memb_md_t *add_membro(struct meta_t *md);
+
+// libera memoria
+struct memb_md_t *destroi_membro(struct memb_md_t *mmd);
+
+// Busca o membor pelo nome passado, retornando o index
+// dele dentro de md->membs
+// retorna -1 se nao achar
+int busca_membro(char *name, struct metad_t *md);
 
 // mostra no stout o conteudo do membro
 void print_membro(struct memb_md_t *mmd);
+// MEMBRO
 
 #endif

@@ -5,59 +5,33 @@
 #include "macros.h"
 #include "dir.h"
 
-int init_meta(struct metad_t *md, size_t memb_sz){
+struct meta_t *init_meta(size_t max_cap){
+    struct meta_t *md = calloc(1, sizeof(struct meta_t));
     if (md == NULL)
-        return 0;
-    md->memb_sz = memb_sz;
-    md->head = NULL;
-    md->tail = NULL;
-    return 1;
+        return (struct meta_t *)NULL;
+
+    md->membs = calloc(max_cap, sizeof(struct memb_md_t *));
+    if  (md->membs == NULL){
+        free(md);
+        return (struct meta_t *)NULL;
+    }
+    md->memb_sz = 0;
+
+    return md;
 }
 
-int destroi_meta(struct metad_t *md){
+struct meta_t *destroi_meta(struct metad_t *md){
     struct memb_md_t *mmd, *aux;
     if (md == NULL)
-        return 0;
-    mmd = md->head;
-    while (mmd != NULL){
-        aux = mmd->prox;
-        destroi_membro(mmd);
-        mmd = aux;
-    }
+        return (struct meta_t *)NULL;
+    for (size_t i = 0; i < md->memb_sz; i++)
+        destroi_membro(md->membs[i]);
 
-    return 1;
-}
+    free(md->membs);
+    free(md);
+    md = NULL;
 
-struct memb_md_t *cria_membro(){
-    return (struct memb_md_t *)calloc(1, sizeof(struct memb_md_t));
-}
-
-struct memb_md_t *destroi_membro(struct memb_md_t *mmd){
-    if (mmd == NULL)
-        return (struct memb_md_t *)NULL;
-    free(mmd);
-    return (struct memb_md_t *)NULL;
-}
-
-struct memb_md_t *busca_membro(char *name,
-                               struct memb_md_t **mmd_ant,
-                               struct metad_t *md)
-{
-    size_t name_sz;
-    struct memb_md_t *mmd;
-
-    if (name == NULL || md == NULL)
-        return NULL;
-
-    name_sz = strlen(name);
-    *mmd_ant = NULL;
-    mmd = md->head;
-    while (mmd != NULL && strncmp(name, mmd->name, name_sz) != 0){
-        *mmd_ant = mmd;
-        mmd = mmd->prox;
-    }
-
-    return mmd;
+    return md;
 }
 
 // TODO: verificar se precisa checar todos o fread para erro
@@ -80,7 +54,7 @@ int get_meta(FILE *archive, struct metad_t *md){
     // le a quantidade de membros
     fread(&(md->memb_sz), sizeof(size_t), 1, archive);
     for (size_t i = 0; i < md->memb_sz; i++){
-        mmd = cria_membro();
+        mmd = add_membro(md);
         if (mmd == NULL){
             ERRO("%s", MEM_ERR_MSG);
             return 0;
@@ -97,14 +71,6 @@ int get_meta(FILE *archive, struct metad_t *md){
         fread(mmd->name, 1, name_sz, archive);
         fread(&mmd->m_size, sizeof(mmd->m_size), 1, archive);
         fread(&mmd->off_set, sizeof(mmd->off_set), 1, archive);
-
-        if (md->head == NULL){
-            md->tail = mmd;
-            md->head = mmd;
-        }else{
-            md->tail->prox = mmd;
-            md->tail = mmd;
-        }
     }
 
     return 1;
@@ -139,6 +105,41 @@ int dump_meta(FILE *archive, struct metad_t *md){
 
     return 1;
 }
+
+struct memb_md_t *cria_membro(){
+    return (struct memb_md_t *)calloc(1, sizeof(struct memb_md_t));
+}
+
+struct memb_md_t *destroi_membro(struct memb_md_t *mmd){
+    if (mmd == NULL)
+        return (struct memb_md_t *)NULL;
+    free(mmd);
+    return (struct memb_md_t *)NULL;
+}
+
+struct memb_md_t *busca_membro(char *name,
+                               struct memb_md_t **mmd_ant,
+                               struct metad_t *md)
+{
+    size_t name_sz;
+    struct memb_md_t *mmd;
+
+    if (name == NULL || md == NULL)
+        return NULL;
+
+    name_sz = strlen(name);
+    *mmd_ant = NULL;
+    mmd = md->head;
+    while (mmd != NULL && !find){
+        if (strncmp(name, mmd->name, name_sz) == 0)
+            find = 1;
+        *mmd_ant = mmd;
+        mmd = mmd->prox;
+    }
+
+    return mmd;
+}
+
 
 void print_membro(struct memb_md_t *mmd){
     if (mmd == NULL){
