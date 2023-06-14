@@ -2,28 +2,32 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
 #include "macros.h"
 #include "dir.h"
 
-struct meta_t *init_meta(size_t max_cap){
-    struct meta_t *md = calloc(1, sizeof(struct meta_t));
+// META
+struct metad_t *init_meta(size_t max_cap){
+    struct metad_t *md = calloc(1, sizeof(struct metad_t));
     if (md == NULL)
-        return (struct meta_t *)NULL;
+        return (struct metad_t *)NULL;
 
     md->membs = calloc(max_cap, sizeof(struct memb_md_t *));
     if  (md->membs == NULL){
         free(md);
-        return (struct meta_t *)NULL;
+        return (struct metad_t *)NULL;
     }
     md->memb_sz = 0;
+    md->cap = max_cap;
 
     return md;
 }
 
-struct meta_t *destroi_meta(struct metad_t *md){
-    struct memb_md_t *mmd, *aux;
+struct metad_t *destroi_meta(struct metad_t *md){
     if (md == NULL)
-        return (struct meta_t *)NULL;
+        return (struct metad_t *)NULL;
     for (size_t i = 0; i < md->memb_sz; i++)
         destroi_membro(md->membs[i]);
 
@@ -34,26 +38,44 @@ struct meta_t *destroi_meta(struct metad_t *md){
     return md;
 }
 
-// TODO: verificar se precisa checar todos o fread para erro
-int get_meta(FILE *archive, struct metad_t *md){
-    struct memb_md_t *mmd;
-    size_t ini_dir, name_sz;
+// retorna 0 em caso de haver algum erro
+// 1 caso contrario
+int get_meta_size(FILE *archive, size_t *meta_sz){
+    size_t ini_meta;
 
-    if (archive == NULL || md == NULL)
+    if (archive == NULL || meta_sz == NULL)
         return 0;
 
     // Pula para pegar o off set que comeca o dir
     if (fseek(archive, -sizeof(size_t), SEEK_END) == -1)
         return 0;
 
-    fread(&ini_dir, sizeof(size_t), 1, archive);
+    if (fread(&ini_meta, sizeof(size_t), 1, archive) != 1)
+        return 0;
+
     // Pula para o inicio do dir
-    if (fseek(archive, ini_dir, SEEK_SET) == -1)
+    if (fseek(archive, ini_meta, SEEK_SET) == -1)
         return 0;
 
     // le a quantidade de membros
-    fread(&(md->memb_sz), sizeof(size_t), 1, archive);
-    for (size_t i = 0; i < md->memb_sz; i++){
+    if (fread(meta_sz, sizeof(size_t), 1, archive) != 1)
+        return 0;
+
+    return 1;
+}
+
+// retorna 0 em caso de erro
+// 1 caso cotrario
+// OBS: responsabilidade de quem chamar a funcao de colocar
+// o ponteiro de leitura no inicio do diretorio
+int get_meta(FILE *archive, struct metad_t *md, size_t n_membs){
+    struct memb_md_t *mmd;
+    size_t name_sz;
+
+    if (archive == NULL || md == NULL)
+        return 0;
+
+    for (size_t i = 0; i < n_membs; i++){
         mmd = add_membro(md);
         if (mmd == NULL){
             ERRO("%s", MEM_ERR_MSG);
@@ -63,6 +85,7 @@ int get_meta(FILE *archive, struct metad_t *md){
         fread(&mmd->size, sizeof(mmd->size), 1, archive);
         name_sz = MMD_NAME_SZ(mmd);
         // aloca memoria com '\0' em todo o nome
+        // + 1 para ser cstr
         mmd->name = calloc(name_sz + 1, sizeof(char));
         if (mmd->name == NULL){
             ERRO("%s", MEM_ERR_MSG);
@@ -76,70 +99,113 @@ int get_meta(FILE *archive, struct metad_t *md){
     return 1;
 }
 
-// TODO: verificar se os fwrite funconam todos
+// OBS: responsabilidade de quem chamar dump_meta
+// de arrumar a posicao do ponteiro de escrita
 int dump_meta(FILE *archive, struct metad_t *md){
     struct memb_md_t *mmd;
-    size_t inicio_dir;
+    size_t inicio_meta;
 
     if (archive == NULL || md == NULL)
         return 0;
 
-    //TODO: os metadado seram jogados onde foi deixado o ponteiro
-    // de escrever do arquive, arrumar ele dentro da funcao ou fora??
-    // ou seja, decidir dentro ou fora onde acaba os dados
-    inicio_dir = ftell(archive);
+    // Pega off_set dos metadados para colocar no final 
+    inicio_meta = ftell(archive);
 
     // quantos membros tem
     fwrite(&md->memb_sz, sizeof(md->memb_sz), 1, archive);
-    mmd = md->head;
-    while (mmd != NULL){
+    for (size_t i = 0; i < md->memb_sz; i++){
+        mmd = md->membs[i];
         fwrite(&mmd->size, sizeof(mmd->size), 1, archive);
         // Pega o tamanho do nome
         fwrite(mmd->name, 1, MMD_NAME_SZ(mmd), archive);
         fwrite(&mmd->m_size, sizeof(mmd->m_size), 1, archive);
         fwrite(&mmd->off_set, sizeof(mmd->off_set), 1, archive);
-        mmd = mmd->prox;
     }
     // off set de onde comeca o diretorio
-    fwrite(&inicio_dir, sizeof(size_t), 1, archive);
+    fwrite(&inicio_meta, sizeof(size_t), 1, archive);
+    // truncar caso tenha acontecido alguma remocao ou
+    // substituicao
+    ftruncate(fileno(archive), ftell(archive));
 
     return 1;
 }
 
-struct memb_md_t *cria_membro(){
-    return (struct memb_md_t *)calloc(1, sizeof(struct memb_md_t));
-}
+void print_meta(struct metad_t *md){
+    struct memb_md_t *mmd;
+    if (md == NULL)
+        return;
 
-struct memb_md_t *destroi_membro(struct memb_md_t *mmd){
+    printf("nº membros: %ld\n", md->memb_sz);
+    for (size_t i = 0; i < md->memb_sz; i++){
+        mmd = md->membs[i];
+        printf("membro %ld\n", i);
+        print_membro(mmd);
+    }
+}
+// META
+
+// MEMBRO
+struct memb_md_t *add_membro(struct metad_t *md){
+    struct memb_md_t *mmd;
+    size_t id;
+    mmd = calloc(1, sizeof(struct memb_md_t));
     if (mmd == NULL)
         return (struct memb_md_t *)NULL;
-    free(mmd);
-    return (struct memb_md_t *)NULL;
-}
 
-struct memb_md_t *busca_membro(char *name,
-                               struct memb_md_t **mmd_ant,
-                               struct metad_t *md)
-{
-    size_t name_sz;
-    struct memb_md_t *mmd;
-
-    if (name == NULL || md == NULL)
-        return NULL;
-
-    name_sz = strlen(name);
-    *mmd_ant = NULL;
-    mmd = md->head;
-    while (mmd != NULL && !find){
-        if (strncmp(name, mmd->name, name_sz) == 0)
-            find = 1;
-        *mmd_ant = mmd;
-        mmd = mmd->prox;
+    id = md->memb_sz++;
+    md->membs[id] = mmd;
+    if (md->memb_sz > md->cap){
+        free(md->membs[id]);
+        md->membs[id] = NULL;
+        return (struct memb_md_t *)NULL;
     }
 
     return mmd;
 }
 
+int remove_membro(struct metad_t *md, size_t index){
+    struct memb_md_t *mmd;
+    if (md == NULL || index >= md->memb_sz)
+        return 0;
+
+    mmd = md->membs[index];
+    for (size_t i = index + 1; i < md->memb_sz; i++){
+        // arruma off set dos proximos
+        md->membs[i]->off_set -= mmd->m_size;
+        // shifta para index anterior
+        md->membs[i - 1] = md->membs[i];
+    }
+    md->memb_sz--;
+    destroi_membro(mmd);
+
+    return 1;
+}
+
+struct memb_md_t *destroi_membro(struct memb_md_t *mmd){
+    if (mmd == NULL)
+        return (struct memb_md_t *)NULL;
+    if (mmd->name != NULL)
+        free(mmd->name);
+    free(mmd);
+    return (struct memb_md_t *)NULL;
+}
+
+int busca_membro(char *name, struct metad_t *md, size_t *id){
+    size_t name_sz;
+
+    if (name == NULL || md == NULL)
+        return 0;
+
+    for (size_t i = 0; i < md->memb_sz; i++){
+        name_sz = strlen(md->membs[i]->name);
+        if (strncmp(md->membs[i]->name, name, name_sz) == 0){
+            *id = i;
+            return 1;
+        }
+    }
+
+    return 0;
+}
 
 void print_membro(struct memb_md_t *mmd){
     if (mmd == NULL){
@@ -151,19 +217,4 @@ void print_membro(struct memb_md_t *mmd){
     printf("\tmembro size: %ld\n", mmd->m_size);
     printf("\tmembro off set: %ld\n", mmd->off_set);
 }
-
-void print_meta(struct metad_t *md){
-    struct memb_md_t *mmd;
-    int i = 0;
-    if (md == NULL)
-        return;
-
-    printf("nº membros: %ld\n", md->memb_sz);
-    mmd = md->head;
-    while (mmd != NULL){
-        printf("membro %d\n", i);
-        print_membro(mmd);
-        mmd = mmd->prox;
-        i++;
-    }
-}
+// MEMBRO

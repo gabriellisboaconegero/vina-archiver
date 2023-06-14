@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <stdarg.h>
 
+#define BYTE_SZ 1
 #define perro(msg, ...) do{             \
     fprintf(stderr, msg, __VA_ARGS__);  \
     fflush(stdout);                     \
@@ -22,6 +23,7 @@
 #define USAGE(fd)                                                                                                                   \
     do{                                                                                                                             \
         fprintf(fd, "USAGE: vina++ <opcao> <archive> [membro1 membro2 ...]\n\n");                                                   \
+        fprintf(fd, "OPCOES:\n");                                                   \
         fprintf(fd, "\t-i: Inserir um ou mais membros no archive\n");                                                               \
         fprintf(fd, "\t    Caso membro ja estaja no archive ele sera substituido\n\n");                                             \
         fprintf(fd, "\t-a: Funciona igual a opcao -i, porem a substituicao so ocorre se o membro passado for mais recente \n\n");   \
