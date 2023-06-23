@@ -10,13 +10,13 @@ all: vina++
 debug: CFLAGS += -g -DDEBUG
 debug: vina++
 
-%.o: %.c %.h
+%.o: %.c %.h $(SRC)/macros.h
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(SRC)/main.o: $(SRC)/main.c
+$(SRC)/main.o: $(SRC)/main.c $(SRC)/macros.h
 	$(CC) $(CFLAGS) -c $< -o $@
 
-vina++: $(OBJS)
+vina++: $(OBJS) 
 	$(CC) $^ -o $@
 
 purge:

@@ -5,6 +5,8 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <pwd.h>
+#include <time.h>
 #include "macros.h"
 #include "dir.h"
 
@@ -94,13 +96,15 @@ int get_meta(FILE *archive, struct metad_t *md, size_t n_membs){
         fread(mmd->name, 1, name_sz, archive);
         fread(&mmd->m_size, sizeof(mmd->m_size), 1, archive);
         fread(&mmd->off_set, sizeof(mmd->off_set), 1, archive);
+        fread(&mmd->pos, sizeof(mmd->pos), 1, archive);
+        fread(&mmd->st_uid, sizeof(mmd->st_uid), 1, archive);
+        fread(&mmd->st_mode, sizeof(mmd->st_mode), 1, archive);
+        fread(&mmd->st_mtim, sizeof(mmd->st_mtim), 1, archive);
     }
 
     return 1;
 }
 
-// OBS: responsabilidade de quem chamar dump_meta
-// de arrumar a posicao do ponteiro de escrita
 int dump_meta(FILE *archive, struct metad_t *md){
     struct memb_md_t *mmd;
     size_t inicio_meta;
@@ -109,17 +113,24 @@ int dump_meta(FILE *archive, struct metad_t *md){
         return 0;
 
     // Pega off_set dos metadados para colocar no final 
-    inicio_meta = ftell(archive);
+    inicio_meta = SIZE_OF_MEMBS(md);
+    fseek(archive, inicio_meta, SEEK_SET);
 
     // quantos membros tem
     fwrite(&md->memb_sz, sizeof(md->memb_sz), 1, archive);
     for (size_t i = 0; i < md->memb_sz; i++){
         mmd = md->membs[i];
+        // arruma as posicoes antes de imprimir
+        mmd->pos = i;
         fwrite(&mmd->size, sizeof(mmd->size), 1, archive);
         // Pega o tamanho do nome
         fwrite(mmd->name, 1, MMD_NAME_SZ(mmd), archive);
         fwrite(&mmd->m_size, sizeof(mmd->m_size), 1, archive);
         fwrite(&mmd->off_set, sizeof(mmd->off_set), 1, archive);
+        fwrite(&mmd->pos, sizeof(mmd->pos), 1, archive);
+        fwrite(&mmd->st_uid, sizeof(mmd->st_uid), 1, archive);
+        fwrite(&mmd->st_mode, sizeof(mmd->st_mode), 1, archive);
+        fwrite(&mmd->st_mtim, sizeof(mmd->st_mtim), 1, archive);
     }
     // off set de onde comeca o diretorio
     fwrite(&inicio_meta, sizeof(size_t), 1, archive);
@@ -130,6 +141,18 @@ int dump_meta(FILE *archive, struct metad_t *md){
     return 1;
 }
 
+void lista_meta(struct metad_t *md){
+    struct memb_md_t *mmd;
+    if (md == NULL)
+        return;
+
+    for (size_t i = 0; i < md->memb_sz; i++){
+        mmd = md->membs[i];
+        mmd->pos = i;
+        lista_membro(mmd);
+    }
+}
+
 void print_meta(struct metad_t *md){
     struct memb_md_t *mmd;
     if (md == NULL)
@@ -138,6 +161,7 @@ void print_meta(struct metad_t *md){
     printf("nº membros: %ld\n", md->memb_sz);
     for (size_t i = 0; i < md->memb_sz; i++){
         mmd = md->membs[i];
+        mmd->pos = i;
         printf("membro %ld\n", i);
         print_membro(mmd);
     }
@@ -153,12 +177,11 @@ struct memb_md_t *add_membro(struct metad_t *md){
         return (struct memb_md_t *)NULL;
 
     id = md->memb_sz++;
-    md->membs[id] = mmd;
     if (md->memb_sz > md->cap){
-        free(md->membs[id]);
-        md->membs[id] = NULL;
+        free(mmd);
         return (struct memb_md_t *)NULL;
     }
+    md->membs[id] = mmd;
 
     return mmd;
 }
@@ -190,6 +213,72 @@ struct memb_md_t *destroi_membro(struct memb_md_t *mmd){
     return (struct memb_md_t *)NULL;
 }
 
+int substitui_membro(struct metad_t *md, size_t index, size_t f_sz){
+    if (md == NULL)
+        return 0;
+
+    md->membs[index]->m_size = f_sz;
+    for (size_t i = index + 1; i < md->memb_sz; i++)
+        md->membs[i]->off_set = md->membs[i - 1]->off_set + 
+                                md->membs[i - 1]->m_size;
+    return 1;
+}
+
+// TODO: pensar em so atualizar a variavel de posicao no diretorio e depois char
+// qsort
+static int swap_mmd(struct metad_t *md, size_t id1, size_t id2){
+    struct memb_md_t *temp;
+    if (md == NULL)
+        return 0;
+
+    temp = md->membs[id1];
+    md->membs[id1] = md->membs[id2];
+    md->membs[id2] = temp;
+
+    return 1;
+}
+
+int move_membro(struct metad_t *md, size_t index, size_t index_parent){
+    size_t index_to_update;
+    if (md == NULL)
+        return 0;
+
+    if (index >= md->memb_sz || index_parent >= md->memb_sz){
+        ERRO("Nao foi possivel mover o elemento de index %ld para depois de %ld",
+                index, index_parent);
+        return 0;
+    }
+
+    //   i  p
+    // 0123456
+    // abcdefg
+    //
+
+    // Se o membro for movido para uma posicao menor
+    if (index > index_parent){
+        for (size_t i = index; i > index_parent + 1; i--)
+            swap_mmd(md, i, i - 1);
+        index_to_update = index_parent + 1;
+    }
+    else{
+        for (size_t i = index; i < index_parent; i++)
+            swap_mmd(md, i, i + 1);
+
+        index_to_update = index;
+        if (index == 0){
+            md->membs[index]->off_set = 0L;
+            index_to_update++;
+        }
+    }
+
+    // atualiza os off_set
+    for (size_t i = index_to_update; i < md->memb_sz; i++)
+        md->membs[i]->off_set = md->membs[i - 1]->off_set + 
+                                md->membs[i - 1]->m_size;
+    
+    return 1;
+}
+
 int busca_membro(char *name, struct metad_t *md, size_t *id){
     size_t name_sz;
 
@@ -207,14 +296,54 @@ int busca_membro(char *name, struct metad_t *md, size_t *id){
     return 0;
 }
 
+static void print_mode(mode_t m){
+    printf(S_ISDIR(m)  ? "d" : "-");
+    printf(m & S_IRUSR ? "r" : "-");
+    printf(m & S_IWUSR ? "w" : "-");
+    printf(m & S_IXUSR ? "x" : "-");
+    printf(m & S_IRGRP ? "r" : "-");
+    printf(m & S_IWGRP ? "w" : "-");
+    printf(m & S_IXGRP ? "x" : "-");
+    printf(m & S_IROTH ? "r" : "-");
+    printf(m & S_IWOTH ? "w" : "-");
+    printf(m & S_IXOTH ? "x" : "-");
+}
+
+void lista_membro(struct memb_md_t *mmd){
+    char strtime[MAX_T_SZ] = {0};
+    if (mmd == NULL){
+        printf("[NULL]\n");
+        return;
+    }
+    // format time como tar -tvf
+    strftime(strtime, MAX_T_SZ, "%Y-%m-%d %H:%M", localtime(&mmd->st_mtim));
+
+    print_mode(mmd->st_mode);
+    printf(" %-10s %9ld %s (%3ld) %s\n",
+            getpwuid(mmd->st_uid)->pw_name,
+            mmd->m_size,
+            strtime,
+            mmd->pos,
+            mmd->name);
+}
+
 void print_membro(struct memb_md_t *mmd){
+    char strtime[MAX_T_SZ] = {0};
     if (mmd == NULL){
         printf("!!!MEMBRO NULO\n");
         return;
     }
+
+    strftime(strtime, MAX_T_SZ, "%Y-%m-%d %H:%M", localtime(&mmd->st_mtim));
     printf("\tnome: %s\n", mmd->name);
     printf("\tmeta dado size: %ld\n", mmd->size);
-    printf("\tmembro size: %ld\n", mmd->m_size);
-    printf("\tmembro off set: %ld\n", mmd->off_set);
+    printf("\tsize: %ld\n", mmd->m_size);
+    printf("\toff_set: %ld\n", mmd->off_set);
+    printf("\tpos: %ld\n", mmd->pos);
+    printf("\tuid: %s\n", getpwuid(mmd->st_uid)->pw_name);
+    printf("\tmode: ");
+    print_mode(mmd->st_mode);
+    printf("\n");
+    printf("\tdata mod: %s\n", strtime);
 }
 // MEMBRO

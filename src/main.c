@@ -10,17 +10,18 @@
 // retorna 1 em caso de erro
 // 0 caso contrario
 //TODO: fazer de uma forma melhor o remove. ta bem ruim
+// Talvez usar um vetor de removidos, marcar elese e depois só mover os
+// que sobraram
 //TODO: dando erro quando remove e nenhum nome eh removido
 int op_remove(char *archive_name, char **f_names, int names_sz){
     FILE *archive;
     int f_rm = 0;
-    size_t meta_sz;
+    size_t meta_sz, index;
     struct metad_t *md;
-    struct memb_md_t *mmd;
 
     archive = fopen(archive_name, "r+");
     if (archive == NULL){
-        PERRO("Nao foi possivel abrir o arquivo [%s]", archive_name);
+        PERRO("[%s]", archive_name);
         return 1;
     }
 
@@ -48,44 +49,47 @@ int op_remove(char *archive_name, char **f_names, int names_sz){
     // TODO: melhorando a logica do remove isso mudo tambem
     // TODO: ver se pode continuar removendo mesmo que nao de para remover
     // um dos arquivos
-    mmd = md->membs[md->memb_sz - 1];
+
     // trunca para retirar o diretorio
-    ftruncate(fileno(archive), mmd->off_set + mmd->m_size);
-    fseek(archive, 0, SEEK_END);
+    //mmd = md->membs[md->memb_sz - 1];
+    //ftruncate(fileno(archive), mmd->off_set + mmd->m_size);
 
     for (int i = 0; i < names_sz && !f_rm; i++){
 #if DEBUG
         printf("Removendo arquivo [%s]\n", f_names[i]);
 #endif
-        switch (remove_file(archive, f_names[i], md)){
-            case NULL_PARAM:{
-                PERRO("Nao foi possivel remover o arquivo [%s]", f_names[i]);
-                fclose(archive);
-                destroi_meta(md);
-                return 1;
-            }; break;
 
-            case NO_MEMBRO:
-                ERRO("Nao foi possivel retirar o arquivo [%s]", f_names[i]); break;
-
-            case REMOVE_FILE:{
-#if DEBUG
-                printf("Arquivo [%s] vazio, excluindo ele\n", archive_name);
-#endif
-                if (remove(archive_name) == -1){
-                    PERRO("[%s]", archive_name);
+        if (!busca_membro(f_names[i], md, &index))
+            ERRO("Nao foi possivel remover o arquivo [%s], nao existe em [%s]",
+                    f_names[i], archive_name);
+        else{
+            switch (remove_file(archive, index, md)){
+                case REMOVE_FAIL:
+                    PERRO("Nao foi possivel remover o arquivo [%s]", f_names[i]);
                     fclose(archive);
                     destroi_meta(md);
                     return 1;
-                }
-                f_rm = 1;
-            }; break;
+                    break;
+                case REMOVE_FILE:
+#if DEBUG
+                    printf("Arquivo [%s] vazio, excluindo ele\n", archive_name);
+#endif
+                    if (remove(archive_name) == -1){
+                        PERRO("[%s]", archive_name);
+                        fclose(archive);
+                        destroi_meta(md);
+                        return 1;
+                    }
+                    f_rm = 1;
+                    break;
+                case REMOVE_OK:
+                    break;
+            }
         }
     }
 
     if (!f_rm)
         dump_meta(archive, md);
-
 #if DEBUG
     print_meta(md);
 #endif
@@ -181,8 +185,7 @@ int op_extrair(char *archive_name, char **f_names, int names_sz){
 // retorna 1 se algo der errado
 // 0 caso contrario
 // TODO: apagar arquivos criados caso de algum erro
-// TODO: substituir o arquivo passado se ele ja tiver la
-int op_inserir(char *archive_name, char **f_names, int names_sz){
+int op_inserir(char *archive_name, char **f_names, int names_sz, int atualizar){
     // abrir com r+ deixa escrever e ler sem apagar nada
     FILE *archive;
     size_t meta_sz, index;
@@ -201,7 +204,7 @@ int op_inserir(char *archive_name, char **f_names, int names_sz){
         // criando caso nao exista
         archive = fopen(archive_name, "w");
         if (archive == NULL){
-            PERRO("nao foi possivel abrir o arquivo [%s]", archive_name);
+            PERRO("[%s]", archive_name);
             return 1;
         }
         md = init_meta(names_sz);
@@ -220,6 +223,7 @@ int op_inserir(char *archive_name, char **f_names, int names_sz){
             return 1;
         }
 
+        // passar o meta_sz + names_sz pois assim nao precisa realocar memoria
         meta_sz += names_sz;
         md = init_meta(meta_sz);
         if (md == NULL){
@@ -228,6 +232,9 @@ int op_inserir(char *archive_name, char **f_names, int names_sz){
             return 1;
         }
 
+        // porem ao pegar os memebros que ja estao no arquivo, pega apenas os
+        // que ja estavam la dentro. Ou seja, o novo meta_sz - names_sz. que eh
+        // quantos membros tem no arvhive
         if (!get_meta(archive, md, meta_sz - names_sz)){
             PERRO("nao foi possivel pegar os metadados do arquivo [%s]", archive_name);
             fclose(archive);
@@ -236,8 +243,6 @@ int op_inserir(char *archive_name, char **f_names, int names_sz){
         }
     }
 
-    // TODO: ver se pode continuar inserindo mesmo se nao conseguir inserir
-    // um novo membro
     for (int i = 0; i < names_sz; i++){
         f_in_name = f_names[i];
         // busca o membro, se nao achar insere
@@ -246,15 +251,26 @@ int op_inserir(char *archive_name, char **f_names, int names_sz){
 #if DEBUG
             printf("Inserindo arquivo [%s]\n", f_in_name);
 #endif
-            if (!insere_file(archive, f_in_name, md))
+            if (!insere_file(archive, f_in_name, md)){
                 PERRO("Nao foi possivel inserir arquivo [%s]", f_in_name);
+                destroi_meta(md);
+                fclose(archive);
+                return 1;
+            }
         }
         // susbtituindo arquivo
         else{
 #if DEBUG
             printf("Substituindo arquivo [%s]\n", f_in_name);
 #endif
-            if (!substitui_file(archive, index, md)){
+            if (atualizar){
+                if (!atualiza_file(archive, index, md)){
+                    PERRO("Nao foi possivel atyalizar o arquivo [%s]", f_in_name);
+                    fclose(archive);
+                    destroi_meta(md);
+                    return 1;
+                }
+            }else if (!substitui_file(archive, index, md)){
                 PERRO("Nao foi possivel substituir o arquivo [%s]", f_in_name);
                 fclose(archive);
                 destroi_meta(md);
@@ -271,6 +287,92 @@ int op_inserir(char *archive_name, char **f_names, int names_sz){
     destroi_meta(md);
 
     return 0;
+}
+
+// imagino que -a significa atualizar
+int op_atualiza(char *archive_name, char **f_names, int names_sz){
+
+}
+
+// retorna 1 se algo der errado
+// 0 em caso contrario
+int op_move(char *archive_name, char *name_to_move, char *name_parent){
+    FILE *archive;
+    size_t meta_sz, index, index_parent;
+    struct metad_t *md;
+
+    archive = fopen(archive_name, "r+");
+    if (archive == NULL){
+        PERRO("[%s]", archive_name);
+        return 1;
+    }
+
+    if (!get_meta_size(archive, &meta_sz)){
+        PERRO("Nao foi possivel pegar quantos membros tem no arquivo [%s]",
+                archive_name);
+        fclose(archive);
+        return 1;
+    }
+    if (meta_sz == 1){
+        ERRO("%s", "Archive tem apenas um membro");
+        fclose(archive);
+        return 1;
+    }
+
+    md = init_meta(meta_sz);
+    if (md == NULL){
+        ERRO("%s", MEM_ERR_MSG);
+        fclose(archive);
+        return 1;
+    }
+
+    if (!get_meta(archive, md, meta_sz)){
+        PERRO("Nao foi possivel pegar os meta dados do arquivo [%s]", archive_name);
+        fclose(archive);
+        destroi_meta(md);
+        return 1;
+    }
+
+    // trunca para retirar o diretorio
+    //mmd = md->membs[md->memb_sz - 1];
+    //ftruncate(fileno(archive), mmd->off_set + mmd->m_size);
+    
+    if (!busca_membro(name_to_move, md, &index)){
+        ERRO("Nao existe membro com nome [%s] para mover", name_to_move);
+        destroi_meta(md);
+        fclose(archive);
+        return 1;
+    }
+
+    if (!busca_membro(name_parent, md, &index_parent)){
+        ERRO("Nao existe membro com nome [%s] para mover [%s] para depois dele",
+                name_to_move, name_parent);
+        destroi_meta(md);
+        fclose(archive);
+        return 1;
+    }
+
+    // caso ja nao esteja na posicao correta ou seja o mesmo elemento
+    if (index_parent != index && index != index_parent + 1){
+        if (!move_file(archive, index, index_parent, md)){
+            PERRO("Nao foi possivel mover [%s] para depois de [%s]",
+                    name_to_move, name_parent);
+            destroi_meta(md);
+            fclose(archive);
+            return 1;
+        }
+
+        dump_meta(archive, md);
+    }
+
+#if DEBUG
+    print_meta(md);
+#endif
+    fclose(archive);
+    destroi_meta(md);
+
+    return 0;
+
 }
 
 // retorna 1 em caso de erro
@@ -306,7 +408,7 @@ int op_list(char *archive_name){
     }
     
     // TODO: implementar para listar metadados
-    //list_meta(md);
+    lista_meta(md);
 #if DEBUG
     print_meta(md);
 #endif
@@ -399,13 +501,12 @@ int main(int argc, char **argv){
     archive_name = argv[optindex++];
     members_sz = argc - optindex;
     members_names = &argv[optindex];
+    //TODO: verificar se todos os arquivos existem
 
     if (o_c)
-        return 0;
         return op_list(archive_name);
     if (o_x)
-        return 0;
-        //return op_extrair(archive_name, members_names, members_sz);
+        return op_extrair(archive_name, members_names, members_sz);
 
     if (members_sz <= 0){
         ERRO("Esta faltando a lista de membros para realizar a operacao -%c", last_set);
@@ -414,19 +515,16 @@ int main(int argc, char **argv){
     }
 
     if (o_i)
-        return 0;
         return op_inserir(archive_name, members_names, members_sz);
     if (o_a){
         printf("Nao implementado opcao -a\n");
         return 0;
     }
     if (o_m){
-        printf("Nao implementado opcao -m\n");
-        return 0;
+        return op_move(archive_name, members_names[0], target);
     }
     if (o_r)
-        return 0;
-        //return op_remove(archive_name, members_names, members_sz);
+        return op_remove(archive_name, members_names, members_sz);
 
     printf("Inalcancavel\n");
     return 0;

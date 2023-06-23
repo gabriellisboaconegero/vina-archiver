@@ -12,14 +12,14 @@
 
 #ifdef DEBUG
 #define ERRO(fmt, ...) fprintf(stderr, "[ERRO][%s, %d]: "fmt"\n", __FILE__, __LINE__, __VA_ARGS__)
-#define PERRO(msg, ...) perro("[ERRO][%s, %d]: "msg, __FILE__, __LINE__, __VA_ARGS__)
+#define PERRO(msg, ...) perro("[ERRO][%s, %d]: "msg": ", __FILE__, __LINE__, __VA_ARGS__)
 #else
 #define ERRO(fmt, ...) fprintf(stderr, "[ERRO]: "fmt"\n", __VA_ARGS__)
-#define PERRO(msg, ...) perro("[ERRO]: "msg, __VA_ARGS__)
+#define PERRO(msg, ...) perro("[ERRO]: "msg": ", __VA_ARGS__)
 #endif
 
 #define MEM_ERR_MSG "Nao foi possivel alocar memoria"
-#define SIZE_OF_MMD (sizeof(struct memb_md_t) - sizeof(char *) - sizeof(struct memb_md_t *))
+#define SIZE_OF_MMD (sizeof(struct memb_md_t) - sizeof(char *))
 #define USAGE(fd)                                                                                                                   \
     do{                                                                                                                             \
         fprintf(fd, "USAGE: vina++ <opcao> <archive> [membro1 membro2 ...]\n\n");                                                   \
