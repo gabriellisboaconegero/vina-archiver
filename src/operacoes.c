@@ -38,10 +38,6 @@ int op_remove(char *archive_name, char **f_names, int names_sz){
         return 1;
     }
     
-    // TODO: melhorando a logica do remove isso mudo tambem
-
-    // trunca para retirar o diretorio
-
     for (int i = 0; i < names_sz && !f_rm; i++){
 #if DEBUG
         printf("Removendo arquivo [%s]\n", f_names[i]);
@@ -169,7 +165,6 @@ int op_extrair(char *archive_name, char **f_names, int names_sz){
 
 // retorna 1 se algo der errado
 // 0 caso contrario
-// TODO: apagar arquivos criados caso de algum erro
 int op_inserir(char *archive_name, char **f_names, int names_sz, int atualizar){
     // abrir com r+ deixa escrever e ler sem apagar nada
     FILE *archive;

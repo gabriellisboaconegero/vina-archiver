@@ -86,7 +86,6 @@ int main(int argc, char **argv){
     archive_name = argv[optindex++];
     members_sz = argc - optindex;
     members_names = &argv[optindex];
-    //TODO: verificar se todos os arquivos existem
 
     if (o_c)
         return op_list(archive_name);
@@ -110,6 +109,6 @@ int main(int argc, char **argv){
     if (o_r)
         return op_remove(archive_name, members_names, members_sz);
 
-    printf("Inalcancavel\n");
+    USAGE(stdout);
     return 0;
 }

@@ -50,8 +50,6 @@ static int copy_data_window(FILE *archive, size_t start_point, size_t window_siz
     final_read = &off_to_read;
     final_write = &off_to_write;
 
-    // copiar o conteudo para uma area que tem o proprio conteudo
-    // overlap
     if (start_point + window_size > where){
         // ajuste para facilitar a função de ler e escrever
         if (window_size >= MAX_SZ){
@@ -176,9 +174,6 @@ size_t fdumpf(FILE *archive, char *f_in_name, struct memb_md_t *mmd){
 
 // retorna os tipos de erros NUL_PARAM, NO_MEMBRO caso queira usar
 // caso de tudo certo retorna REMOVE_OK
-// TODO: pegar e shifitar apenas os dados, nao o diretorio tambem
-// TODO: alguma forma de remover mais eficiente. Agora ta removendo file por file
-// e quando remove ja shifta tudo
 int remove_file(FILE *archive, size_t index, struct metad_t *md){
     struct memb_md_t *mmd, *prox_mmd;
     
@@ -392,20 +387,26 @@ int move_file(FILE *archive, size_t index, size_t index_parent, struct metad_t *
                         mmd->off_set - mmd_after->off_set,
                         mmd_after->off_set + mmd->m_size))
                 return 0;
+            // copia de volta o dado para a posicao
+            if (!copy_data_window(archive,
+                        SIZE_OF_MEMBS(md),
+                        mmd->m_size,
+                        mmd_after->off_set))
+                return 0;
         }else{
             if (!copy_data_window(archive,
                         mmd->off_set + mmd->m_size,
                         mmd_after->off_set - (mmd->off_set + mmd->m_size),
                         mmd->off_set))
-            return 0;
+                return 0;
+            // copia de volta o dado para a posicao
+            if (!copy_data_window(archive,
+                        SIZE_OF_MEMBS(md),
+                        mmd->m_size,
+                        mmd_after->off_set - mmd->m_size))
+                return 0;
         }
 
-        // copia de volta o dado para a posicao
-        if (!copy_data_window(archive,
-                    SIZE_OF_MEMBS(md),
-                    mmd->m_size,
-                    mmd_after->off_set))
-            return 0;
     }
 
     // move o membro nos meta dados
