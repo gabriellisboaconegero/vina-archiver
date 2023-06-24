@@ -2,8 +2,6 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <string.h>
-#include <sys/stat.h>
-#include <sys/types.h>
 #include <unistd.h>
 #include <pwd.h>
 #include <time.h>
@@ -159,10 +157,10 @@ void print_meta(struct metad_t *md){
         return;
 
     printf("nº membros: %ld\n", md->memb_sz);
+    printf("nº     offset      size name\n");
     for (size_t i = 0; i < md->memb_sz; i++){
         mmd = md->membs[i];
         mmd->pos = i;
-        printf("membro %ld\n", i);
         print_membro(mmd);
     }
 }
@@ -213,19 +211,20 @@ struct memb_md_t *destroi_membro(struct memb_md_t *mmd){
     return (struct memb_md_t *)NULL;
 }
 
-int substitui_membro(struct metad_t *md, size_t index, size_t f_sz){
+int substitui_membro(struct metad_t *md, size_t index, struct stat st){
     if (md == NULL)
         return 0;
 
-    md->membs[index]->m_size = f_sz;
+    md->membs[index]->m_size = st.st_size;
+    md->membs[index]->st_uid = st.st_uid;
+    md->membs[index]->st_mode = st.st_mode;
+    md->membs[index]->st_mtim = st.st_mtime;
     for (size_t i = index + 1; i < md->memb_sz; i++)
         md->membs[i]->off_set = md->membs[i - 1]->off_set + 
                                 md->membs[i - 1]->m_size;
     return 1;
 }
 
-// TODO: pensar em so atualizar a variavel de posicao no diretorio e depois char
-// qsort
 static int swap_mmd(struct metad_t *md, size_t id1, size_t id2){
     struct memb_md_t *temp;
     if (md == NULL)
@@ -280,14 +279,22 @@ int move_membro(struct metad_t *md, size_t index, size_t index_parent){
 }
 
 int busca_membro(char *name, struct metad_t *md, size_t *id){
+    int is_dir;
     size_t name_sz;
+    struct memb_md_t *mmd;
 
     if (name == NULL || md == NULL)
         return 0;
 
     for (size_t i = 0; i < md->memb_sz; i++){
-        name_sz = strlen(md->membs[i]->name);
-        if (strncmp(md->membs[i]->name, name, name_sz) == 0){
+        mmd = md->membs[i];
+        // se for diretorio, tirar o './' para comparar
+        is_dir = strchr(mmd->name, '/') != NULL;
+        name_sz = strlen(mmd->name) - 2 * is_dir;
+        if (strncmp(mmd->name + 2 * is_dir,   // se for dir pula o './'
+                    name + (name[0] == '/'),  // Se comeca com '/' pular
+                    name_sz) == 0)
+        {
             *id = i;
             return 1;
         }
@@ -297,7 +304,9 @@ int busca_membro(char *name, struct metad_t *md, size_t *id){
 }
 
 static void print_mode(mode_t m){
-    printf(S_ISDIR(m)  ? "d" : "-");
+    // era para ser o de diretorio, mas nao eh inserido diretorio
+    // entao apenas mostra - para ficar o tar -tvf
+    printf("-");
     printf(m & S_IRUSR ? "r" : "-");
     printf(m & S_IWUSR ? "w" : "-");
     printf(m & S_IXUSR ? "x" : "-");
@@ -328,22 +337,15 @@ void lista_membro(struct memb_md_t *mmd){
 }
 
 void print_membro(struct memb_md_t *mmd){
-    char strtime[MAX_T_SZ] = {0};
     if (mmd == NULL){
         printf("!!!MEMBRO NULO\n");
         return;
     }
 
-    strftime(strtime, MAX_T_SZ, "%Y-%m-%d %H:%M", localtime(&mmd->st_mtim));
-    printf("\tnome: %s\n", mmd->name);
-    printf("\tmeta dado size: %ld\n", mmd->size);
-    printf("\tsize: %ld\n", mmd->m_size);
-    printf("\toff_set: %ld\n", mmd->off_set);
-    printf("\tpos: %ld\n", mmd->pos);
-    printf("\tuid: %s\n", getpwuid(mmd->st_uid)->pw_name);
-    printf("\tmode: ");
-    print_mode(mmd->st_mode);
-    printf("\n");
-    printf("\tdata mod: %s\n", strtime);
+    printf("%2ld: %9ld %9ld %s\n",
+            mmd->pos,
+            mmd->off_set,
+            mmd->m_size,
+            mmd->name);
 }
 // MEMBRO

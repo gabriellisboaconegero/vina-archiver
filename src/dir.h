@@ -1,14 +1,15 @@
 #ifndef DIR_H_
 #define DIR_H_
 #include <stdio.h>
-#include "macros.h"
 #include <time.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include "macros.h"
 #define MAX_T_SZ 128
 #define MMD_NAME_SZ(mmd) ((mmd)->size - SIZE_OF_MMD)
 #define LAST_MMD(md) ((md)->membs[(md)->memb_sz - 1])
 #define SIZE_OF_MEMBS(md) (LAST_MMD(md)->off_set + LAST_MMD(md)->m_size)
 
-// TODO: colocar uma propriedade de ordem inserida
 struct memb_md_t {
     // size_t dir_id;
     size_t size;            // tamanho do metadado, contado o nome
@@ -58,8 +59,8 @@ struct memb_md_t *add_membro(struct metad_t *md);
 // Remove membro do meta dado
 int remove_membro(struct metad_t *md, size_t index);
 
-// substitui membro
-int substitui_membro(struct metad_t *md, size_t index, size_t f_sz);
+// substitui membro, atualizando os dados dele
+int substitui_membro(struct metad_t *md, size_t index, struct stat st);
 
 // move membro de index para depois de membro de index_parent
 int move_membro(struct metad_t *md, size_t index, size_t index_parent);

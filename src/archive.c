@@ -16,9 +16,11 @@ static void val_minus(size_t *a, size_t b){
     *a -= b;
 }
 
+// Move uma parte dos dados do archive comecando em start_point, movendo 
+// window_size dados para o lado esquerdo para a posicao where
 // retorna 0 em caso de não haver espaço para mover o conteudo ou algum erro
 // 1 caso contrario
-int copy_data_window(FILE *archive, size_t start_point, size_t window_size, size_t where){
+static int copy_data_window(FILE *archive, size_t start_point, size_t window_size, size_t where){
     size_t archive_sz, off_to_read, off_to_write, resto_sz;
     size_t *final_read, *final_write;
     char buffer[MAX_SZ] = {0};
@@ -83,6 +85,27 @@ int copy_data_window(FILE *archive, size_t start_point, size_t window_size, size
     return 1;
 }
 
+// cria od diretorios necessarios para criar o arquivo
+static int extract_dir(char *path_name){
+    char *slash, *path_cp = path_name;
+    
+    while ((slash = strchr(path_cp, '/')) != NULL){
+        // coloca o \0 para que o mkdir nao tente criar tudo de uma vez
+        *slash = '\0';
+        if (mkdir(path_name, S_IRWXU) && errno != EEXIST){
+            *slash = '/';
+            PERRO("Nao foi possivel criar o diretorio [%s]", path_name);
+            return 0;
+        }
+        // volta para o /, pois esta alterando o nome e tem voltar
+        *slash = '/';
+        // atualiza o path_cp, que eh de onde o strchr comeca a procurar pela /
+        path_cp = slash + 1;
+    }
+
+    return 1;
+}
+
 // retorna 0 em caso de erro
 // 1 caso contrario
 int extract_file(FILE *archive, struct memb_md_t *mmd){
@@ -92,10 +115,17 @@ int extract_file(FILE *archive, struct memb_md_t *mmd){
 
     if (archive == NULL || mmd == NULL)
         return 0;
+    
+    // cria os diretorios necessarios
+    if (!extract_dir(mmd->name))
+        return 0;
 
     f_out = fopen(mmd->name, "w");
-    if (f_out == NULL){
-        PERRO("[%s]", mmd->name);
+    if (f_out == NULL)
+        return 0;
+
+    if(chmod(mmd->name, mmd->st_mode)){
+        PERRO("Nao foi possivel alterar as permissoes do arquivo [%s]", mmd->name);
         return 0;
     }
     if (fseek(archive, mmd->off_set, SEEK_SET) == -1)
@@ -187,6 +217,7 @@ int remove_file(FILE *archive, size_t index, struct metad_t *md){
 // retorna 0 em casso de erro
 // 1 caso contrario
 int insere_file(FILE *archive, char *name, struct metad_t *md){
+    int is_dir;
     struct stat st;
     size_t f_sz, name_sz;
     struct memb_md_t *mmd, *mmd_anterior;
@@ -208,19 +239,33 @@ int insere_file(FILE *archive, char *name, struct metad_t *md){
         return 0;
     }
 
+    // se for diretorio coloca "./"
+    is_dir = strchr(name, '/') != NULL;
     name_sz = strlen(name);
+    if (is_dir)
+        name_sz += 2;
+
     mmd->name = calloc(name_sz + 1, sizeof(char));
     if (mmd->name == NULL){
         ERRO("%s", MEM_ERR_MSG);
         return 0;
     }
-    strncpy(mmd->name, name, name_sz);
+
+    if (is_dir){
+        mmd->name[0] = '.';
+        mmd->name[1] = '/';
+    }
+    if (name[0] == '/')
+        strncpy(&(mmd->name[1]), name, strlen(name));
+    else
+        strncpy(&(mmd->name[2 * is_dir]), name, strlen(name));
+
     mmd->size = name_sz + SIZE_OF_MMD;
     mmd->m_size = f_sz;
     mmd->pos = md->memb_sz;
     mmd->st_uid = st.st_uid;
     mmd->st_mode = st.st_mode;
-    mmd->st_mtim = st.st_mtime;
+    mmd->st_mtim = st.st_mtim.tv_sec;
     // Se no tiver nenhum outro membro
     if (md->memb_sz == 1)
         mmd->off_set = 0L;
@@ -229,8 +274,6 @@ int insere_file(FILE *archive, char *name, struct metad_t *md){
         mmd->off_set = mmd_anterior->off_set + mmd_anterior->m_size;
     }
 
-    // TODO: inserir todos os novos arquivos no diretorio primeiro
-    // para dps inserir o conteudo????
     if (fdumpf(archive, name, mmd) != mmd->m_size){
         PERRO("Nao foi possivel escrever os dados do arquivo [%s]", name);
         return 0;
@@ -241,7 +284,7 @@ int insere_file(FILE *archive, char *name, struct metad_t *md){
 
 // retorna 0 se acorreu algum ero
 // 1 caso contrario
-int substitui_file(FILE *archive, size_t index, struct metad_t *md){
+int substitui_file(FILE *archive, size_t index, struct metad_t *md, char *file_sub){
     size_t f_sz;
     struct stat st;
     struct memb_md_t *mmd;
@@ -250,7 +293,7 @@ int substitui_file(FILE *archive, size_t index, struct metad_t *md){
         return 0;
     
     mmd = md->membs[index];
-    if (stat(mmd->name, &st) == -1){
+    if (stat(file_sub, &st) == -1){
         PERRO("[%s]: ", mmd->name);
         return 0;
     }
@@ -270,12 +313,12 @@ int substitui_file(FILE *archive, size_t index, struct metad_t *md){
                     mmd->off_set + f_sz))
         return 0;
 
-    if (!substitui_membro(md, index, f_sz)){
+    if (!substitui_membro(md, index, st)){
         ERRO("%s", "Inalcancavel");
         return 0;
     }
 
-    if (fdumpf(archive, mmd->name, mmd) != mmd->m_size){
+    if (fdumpf(archive, file_sub, mmd) != mmd->m_size){
         PERRO("Nao foi possivel escrever os dados do arquivo [%s]", mmd->name);
         return 0;
     }
@@ -286,7 +329,7 @@ int substitui_file(FILE *archive, size_t index, struct metad_t *md){
 // retorna 0 se acorreu algum ero
 // 1 caso atualizacao foi feita sem erro
 // 2 caso nao tenha sido feita
-int atualiza_file(FILE *archive, size_t index, struct metad_t *md){
+int atualiza_file(FILE *archive, size_t index, struct metad_t *md, char *file_sub){
     struct stat st;
     struct memb_md_t *mmd;
 
@@ -300,14 +343,15 @@ int atualiza_file(FILE *archive, size_t index, struct metad_t *md){
     }
 
     // se o tempo for maior quer dizer que eh mais recente
-    return st.st_mtime > mmd->st_mtim ? substitui_file(archive, index, md) : 2;
+    return st.st_mtim.tv_sec > mmd->st_mtim ?
+        substitui_file(archive, index, md, file_sub) :
+        2;
 }
 
 // retorna 0 se acorreu algum ero
 // 1 caso contrario
 int move_file(FILE *archive, size_t index, size_t index_parent, struct metad_t *md){
-    size_t archive_sz, index_to_retrive;
-    struct memb_md_t *mmd, *mmd_after, *mmd_parent, *mmd_to_retrive;
+    struct memb_md_t *mmd, *mmd_after;
 
     if (archive == NULL || md == NULL)
         return 0;
@@ -324,8 +368,6 @@ int move_file(FILE *archive, size_t index, size_t index_parent, struct metad_t *
     // mmd_parent = md->membs[index_parent];
     // Aloca espaco no final para mover
     ftruncate(fileno(archive), SIZE_OF_MEMBS(md) + mmd->m_size);
-    // salva tamanho inicial para volar ao tamnho correto depois
-    archive_sz = SIZE_OF_MEMBS(md) + mmd->m_size;
 
     // copia para final do arquivo
     if (!copy_data_window(archive,
@@ -354,7 +396,7 @@ int move_file(FILE *archive, size_t index, size_t index_parent, struct metad_t *
             if (!copy_data_window(archive,
                         mmd->off_set + mmd->m_size,
                         mmd_after->off_set - (mmd->off_set + mmd->m_size),
-                        mmd->off_set));
+                        mmd->off_set))
             return 0;
         }
 
@@ -365,39 +407,6 @@ int move_file(FILE *archive, size_t index, size_t index_parent, struct metad_t *
                     mmd_after->off_set))
             return 0;
     }
-
-    /*
-    // se for mover para depois do ultimo elemento
-    // nao precisa mover o conteudo para colocar
-    if (index_parent < md->memb_sz - 1){
-        mmd_after = md->membs[index_parent + 1];
-        // abre espaco antes do mmd_after
-        copy_data_window(archive,
-                mmd_after->off_set,
-                SIZE_OF_MEMBS(md) - mmd_after->off_set,
-                mmd_after->off_set + mmd->m_size);
-        // atualiza tabela de off_set, comeca pelo proximo depois de mmd_parent
-        for (size_t i = index_parent + 1; i < md->memb_sz; i++)
-            md->membs[i]->off_set += mmd->m_size;
-    }
-
-    // copia mmd para o espaco
-    copy_data_window(archive,
-            mmd->off_set,
-            mmd->m_size,
-            mmd_parent->off_set + mmd_parent->m_size);
-
-    index_to_retrive = index + 1;
-    // nao precisa voltar o conteudo se o bloco movido foi o
-    // ultimo, pois eh so truncar para o tamanho original
-    if (index_to_retrive < md->memb_sz){
-        // volta o conteudo dos blks_depois 
-        mmd_to_retrive = md->membs[index_to_retrive];
-        copy_data_window(archive,
-                mmd_to_retrive->off_set,
-                archive_sz - mmd_to_retrive->off_set,
-                mmd->off_set);
-    }*/
 
     // move o membro nos meta dados
     move_membro(md, index, index_parent);
