@@ -19,8 +19,5 @@ $(SRC)/main.o: $(SRC)/main.c
 vina++: $(OBJS)
 	$(CC) $^ -o $@
 
-purge:
-	rm -rf $(SRC)/*.o vina++
-
 clean:
-	rm -rf $(SRC)/*.o
+	rm -rf $(SRC)/*.o vina++

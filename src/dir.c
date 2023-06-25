@@ -108,7 +108,10 @@ int dump_meta(FILE *archive, struct metad_t *md){
     size_t inicio_meta;
 
     if (archive == NULL || md == NULL)
-        return 0;
+        return FAIL;
+    
+    if (md->memb_sz == 0)
+        return NO_META;
 
     // Pega off_set dos metadados para colocar no final 
     inicio_meta = SIZE_OF_MEMBS(md);
@@ -136,7 +139,7 @@ int dump_meta(FILE *archive, struct metad_t *md){
     // substituicao
     ftruncate(fileno(archive), ftell(archive));
 
-    return 1;
+    return OK;
 }
 
 void lista_meta(struct metad_t *md){
@@ -184,6 +187,15 @@ struct memb_md_t *add_membro(struct metad_t *md){
     return mmd;
 }
 
+struct memb_md_t *destroi_membro(struct memb_md_t *mmd){
+    if (mmd == NULL)
+        return (struct memb_md_t *)NULL;
+    if (mmd->name != NULL)
+        free(mmd->name);
+    free(mmd);
+    return (struct memb_md_t *)NULL;
+}
+
 int remove_membro(struct metad_t *md, size_t index){
     struct memb_md_t *mmd;
     if (md == NULL || index >= md->memb_sz)
@@ -200,15 +212,6 @@ int remove_membro(struct metad_t *md, size_t index){
     destroi_membro(mmd);
 
     return 1;
-}
-
-struct memb_md_t *destroi_membro(struct memb_md_t *mmd){
-    if (mmd == NULL)
-        return (struct memb_md_t *)NULL;
-    if (mmd->name != NULL)
-        free(mmd->name);
-    free(mmd);
-    return (struct memb_md_t *)NULL;
 }
 
 int substitui_membro(struct metad_t *md, size_t index, struct stat st){

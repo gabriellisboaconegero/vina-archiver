@@ -48,7 +48,7 @@ int op_remove(char *archive_name, char **f_names, int names_sz){
                     f_names[i], archive_name);
         else{
             switch (remove_file(archive, index, md)){
-                case REMOVE_FAIL:
+                case FAIL:
                     PERRO("Nao foi possivel remover o arquivo [%s]", f_names[i]);
                     fclose(archive);
                     destroi_meta(md);
@@ -66,8 +66,7 @@ int op_remove(char *archive_name, char **f_names, int names_sz){
                     }
                     f_rm = 1;
                     break;
-                case REMOVE_OK:
-                    break;
+                default: break;
             }
         }
     }
@@ -231,11 +230,17 @@ int op_inserir(char *archive_name, char **f_names, int names_sz, int atualizar){
 #if DEBUG
             printf("Inserindo arquivo [%s]\n", f_in_name);
 #endif
-            if (!insere_file(archive, f_in_name, md)){
-                PERRO("Nao foi possivel inserir arquivo [%s]", f_in_name);
-                destroi_meta(md);
-                fclose(archive);
-                return 1;
+            switch (insere_file(archive, f_in_name, md)){
+                case FAIL:
+                    PERRO("Nao foi possivel inserir arquivo [%s]", f_in_name);
+                    destroi_meta(md);
+                    fclose(archive);
+                    return 1;
+                    break;
+                case FILE_MISSING:
+                    ERRO("Nao foi possivel inserir arquivo [%s] (Ignorando)", f_in_name);
+                    break;
+                default: break;
             }
         }
         // susbtituindo arquivo
@@ -308,8 +313,6 @@ int op_move(char *archive_name, char *name_to_move, char *name_parent){
         return 1;
     }
 
-    // trunca para retirar o diretorio
-    
     if (!busca_membro(name_to_move, md, &index)){
         ERRO("Nao existe membro com nome [%s] para mover", name_to_move);
         destroi_meta(md);

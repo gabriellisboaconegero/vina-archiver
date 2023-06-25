@@ -1,6 +1,12 @@
 #ifndef MACROS_H_
 #define MACROS_H_
 #define MAX_SZ 1024
+#define FAIL 0
+#define OK 1
+#define REMOVE_FILE 2
+#define FILE_MISSING 3
+#define NONE 4
+#define NO_META 5
 #include <errno.h>
 #include <stdarg.h>
 

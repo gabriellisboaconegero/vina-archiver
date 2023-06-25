@@ -56,6 +56,9 @@ void lista_meta(struct metad_t *md);
 // insere membro novo no meta dado
 struct memb_md_t *add_membro(struct metad_t *md);
 
+// libera memoria
+struct memb_md_t *destroi_membro(struct memb_md_t *mmd);
+
 // Remove membro do meta dado
 int remove_membro(struct metad_t *md, size_t index);
 
@@ -64,9 +67,6 @@ int substitui_membro(struct metad_t *md, size_t index, struct stat st);
 
 // move membro de index para depois de membro de index_parent
 int move_membro(struct metad_t *md, size_t index, size_t index_parent);
-
-// libera memoria
-struct memb_md_t *destroi_membro(struct memb_md_t *mmd);
 
 // Busca o membor pelo nome passado, retornando 1 se achou
 // e 0 em caso contrario

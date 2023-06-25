@@ -3,6 +3,7 @@
 
 // Operacao de remover do archive
 // dada uma lista de nomes remove eles do archive
+// Caso remova todos os membros o archive eh deletado
 int op_remove(char *archive_name, char **f_names, int names_sz);
 
 // Operacao de extrair do archive
